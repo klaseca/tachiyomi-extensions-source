@@ -47,7 +47,7 @@ class AllHentai : GroupLe("AllHentai", "https://z.ahen.me", "ru") {
                 }
                 is Tags -> {
                     if (filter.state > 0) {
-                        val tagName = getTagsList()[filter.state].url
+                        val tagName = tagsList[filter.state].url
                         return GET("$baseUrl/list/tag/$tagName?offset=${70 * (page - 1)}", headers)
                     }
                 }
@@ -78,12 +78,12 @@ class AllHentai : GroupLe("AllHentai", "https://z.ahen.me", "ru") {
     override fun getFilterList() = FilterList(
         OrderBy(),
         Tags(tagsName),
-        GenreList(getGenreList()),
-        Category(getCategoryList()),
-        FilList(getFilList()),
+        GenreList(genreList),
+        Category(categoryList),
+        FilList(filList),
     )
 
-    private fun getGenreList() = listOf(
+    private val genreList = listOf(
         Genre("ahegao", "el_855"),
         Genre("анал", "el_828"),
         Genre("бдсм", "el_78"),
@@ -120,7 +120,7 @@ class AllHentai : GroupLe("AllHentai", "https://z.ahen.me", "ru") {
         Genre("яой", "el_83"),
     )
 
-    private fun getCategoryList() = listOf(
+    private val categoryList = listOf(
         Genre("3D", "el_626"),
         Genre("Анимация", "el_5777"),
         Genre("Без текста", "el_3157"),
@@ -128,7 +128,7 @@ class AllHentai : GroupLe("AllHentai", "https://z.ahen.me", "ru") {
         Genre("Порно манхва", "el_1104"),
     )
 
-    private fun getFilList() = listOf(
+    private val filList = listOf(
         Genre("Высокий рейтинг", "s_high_rate"),
         Genre("Сингл", "s_single"),
         Genre("Для взрослых", "s_mature"),
@@ -139,7 +139,7 @@ class AllHentai : GroupLe("AllHentai", "https://z.ahen.me", "ru") {
         Genre("Продается", "s_sale"),
     )
 
-    private fun getTagsList() = listOf(
+    private val tagsList = listOf(
         Tag("Без тега", "not"),
         Tag("handjob", "handjob"),
         Tag("inseki", "inseki"),
@@ -259,7 +259,7 @@ class AllHentai : GroupLe("AllHentai", "https://z.ahen.me", "ru") {
         Tag("яндере", "yandere"),
     )
 
-    private val tagsName = getTagsList().map {
+    private val tagsName = tagsList.map {
         it.name
     }.toTypedArray()
 
