@@ -15,7 +15,7 @@ import eu.kanade.tachiyomi.extension.ru.agnamer.dto.ExBookDto
 import eu.kanade.tachiyomi.extension.ru.agnamer.dto.ExLibraryDto
 import eu.kanade.tachiyomi.extension.ru.agnamer.dto.ExWrapperDto
 import eu.kanade.tachiyomi.extension.ru.agnamer.dto.LibraryDto
-import eu.kanade.tachiyomi.extension.ru.agnamer.dto.MangaDetDto
+import eu.kanade.tachiyomi.extension.ru.agnamer.dto.MangaDto
 import eu.kanade.tachiyomi.extension.ru.agnamer.dto.MyLibraryDto
 import eu.kanade.tachiyomi.extension.ru.agnamer.dto.PageDto
 import eu.kanade.tachiyomi.extension.ru.agnamer.dto.PageWrapperDto
@@ -105,6 +105,8 @@ class Agnamer : ConfigurableSource, HttpSource() {
     override val supportsLatest = true
 
     private val userAgentRandomizer = "${Random.nextInt().absoluteValue}"
+
+    private val chapterChunkSize = 100
 
     override fun headersBuilder() = Headers.Builder().apply {
         // Magic User-Agent, no change/update, does not cause 403
@@ -430,7 +432,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
         }
     }
 
-    private fun MangaDetDto.toSManga(): SManga {
+    private fun MangaDto.toSManga(): SManga {
         val ratingValue = avg_rating.jsonPrimitive.floatOrNull ?: 0f
         val ratingStar = when {
             ratingValue > 9.5 -> "★★★★★"
@@ -445,7 +447,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
             ratingValue > 0.5 -> "✬☆☆☆☆"
             else -> "☆☆☆☆☆"
         }
-        val o = this
+        val self = this
         return SManga.create().apply {
             // Do not change the title name to ensure work with a multilingual catalog!
             title = if (isEng.equals("rus")) rus_name else en_name
@@ -457,7 +459,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
             }
             val mediaNameLanguage = if (isEng.equals("rus")) en_name else rus_name
             this.description =
-                "$mediaNameLanguage\n$ratingStar $ratingValue (голосов: $count_rating)\n$altName" + o.description?.let {
+                "$mediaNameLanguage\n$ratingStar $ratingValue (голосов: $count_rating)\n$altName" + self.description?.let {
                 Jsoup.parse(it)
             }?.select("body:not(:has(p)),p,br")?.prepend("\\n")?.text()?.replace("\\n", "\n")
                 ?.replace("\n ", "\n").orEmpty()
@@ -465,7 +467,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
                 (parseType(type) + ", " + parseAge(age_limit) + ", " + (genres + categories).joinToString { it.name }).split(
                     ", ",
                 ).filter { it.isNotEmpty() }.joinToString { it.trim() }
-            status = parseStatus(o.status.id)
+            status = parseStatus(self.status.id)
         }
     }
 
@@ -509,7 +511,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
     }
 
     override fun mangaDetailsParse(response: Response): SManga {
-        val series = json.decodeFromString<SeriesWrapperDto<MangaDetDto>>(response.body.string())
+        val series = json.decodeFromString<SeriesWrapperDto<MangaDto>>(response.body.string())
         branches[series.content.dir] = series.content.branches
         mangaIDs[series.content.dir] = series.content.id
         return series.content.toSManga()
@@ -528,7 +530,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
         // callback request for update outside the library
         val content = json.decodeFromString<JsonObject>(responseString)["content"]
         return if (content is JsonObject) {
-            val series = json.decodeFromJsonElement<MangaDetDto>(content)
+            val series = json.decodeFromJsonElement<MangaDto>(content)
             branches[series.dir] = series.branches
             mangaIDs[series.dir] = series.id
             if (series.status.id == 5 && series.branches.maxByOrNull { selector(it) }!!.count_chapters == 0) {
@@ -562,9 +564,10 @@ class Agnamer : ConfigurableSource, HttpSource() {
     private fun selector(b: BranchesDto): Int = b.count_chapters
 
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
-        val branch = branches.getOrElse(
-            manga.url.substringAfter("/api/titles/").substringBefore("/").substringBefore("?"),
-        ) { mangaBranches(manga) }
+        val seriesDir =
+            manga.url.substringAfter("/api/titles/").substringBefore("/").substringBefore("?")
+
+        val branch = branches.getOrElse(seriesDir) { mangaBranches(manga) }
 
         return when {
             branch.maxByOrNull { selector(it) }!!.count_chapters == 0 -> {
@@ -580,10 +583,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
             }
 
             else -> {
-                val mangaID = mangaIDs[
-                    manga.url.substringAfter("/api/titles/").substringBefore("/")
-                        .substringBefore("?"),
-                ]
+                val mangaID = mangaIDs[seriesDir]
                 val exChapters = if (preferences.getBoolean(EX_PAID_PREF, true)) {
                     json.decodeFromString<ExWrapperDto<List<ExBookDto>>>(
                         client.newCall(exMangaManager.fetchChapterListRequest(mangaID))
@@ -594,7 +594,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
                 }
                 val selectedBranch = branch.maxByOrNull { selector(it) }!!
                 val tempChaptersList = mutableListOf<SChapter>()
-                (1..(selectedBranch.count_chapters / 300 + 1)).map {
+                (1..(selectedBranch.count_chapters / chapterChunkSize + 1)).map {
                     val response = chapterListRequest(selectedBranch.id, it)
                     chapterListParse(response, manga, exChapters)
                 }.let { tempChaptersList.addAll(it.flatten()) }
@@ -608,7 +608,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
                                 ).content.firstOrNull()?.chapter?.toFloatOrNull() ?: -2F
                             )
                         ) {
-                            (1..(selectedBranch2.count_chapters / 300 + 1)).map {
+                            (1..(selectedBranch2.count_chapters / chapterChunkSize + 1)).map {
                                 val response = chapterListRequest(selectedBranch2.id, it)
                                 chapterListParse(response, manga, exChapters)
                             }.let { tempChaptersList.addAll(0, it.flatten()) }
@@ -635,7 +635,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
 
     private fun chapterListRequest(branch: Long, page: Number): Response = client.newCall(
         GET(
-            "$mainUrl/api/titles/chapters/?branch_id=$branch&page=$page&count=300",
+            "$mainUrl/api/titles/chapters/?branch_id=$branch&page=$page&count=$chapterChunkSize",
             headers,
         ),
     ).execute().run {
