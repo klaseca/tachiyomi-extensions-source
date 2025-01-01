@@ -44,7 +44,7 @@ data class StatusDto(
 )
 
 @Serializable
-data class MangaDetDto(
+data class MangaDto(
     val id: Long,
     val en_name: String,
     val rus_name: String,
