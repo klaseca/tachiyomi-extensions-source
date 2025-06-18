@@ -1,9 +1,7 @@
 package eu.kanade.tachiyomi.extension.ru.agnamer
 
-import android.annotation.TargetApi
 import android.app.Application
 import android.content.SharedPreferences
-import android.os.Build
 import android.widget.Toast
 import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
@@ -120,7 +118,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
             "Accept",
             "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/jxl,image/webp,*/*;q=0.8",
         )
-        add("Referer", mainUrl.replace("api.", ""))
+        add("Referer", "${mainUrl.replace("api.", "")}/")
     }
 
     private fun authIntercept(chain: Interceptor.Chain): Response {
@@ -518,14 +516,14 @@ class Agnamer : ConfigurableSource, HttpSource() {
     }
 
     private fun mangaBranches(manga: SManga): List<BranchesDto> {
-        val requestString = client.newCall(GET(mainUrl + manga.url, headers)).execute()
-        if (!requestString.isSuccessful) {
+        val response = client.newCall(GET(mainUrl + manga.url, headers)).execute()
+        if (!response.isSuccessful) {
             if (userId == "") {
-                throw Exception("HTTP error ${requestString.code}. Для просмотра контента необходима авторизация через WebView\uD83C\uDF0E")
+                throw Exception("HTTP error ${response.code}. Для просмотра контента необходима авторизация через WebView\uD83C\uDF0E")
             }
-            throw Exception("HTTP error ${requestString.code}")
+            throw Exception("HTTP error ${response.code}")
         }
-        val responseString = requestString.body.string()
+        val responseString = response.body.string()
         // manga requiring login return "content" as a JsonArray instead of the JsonObject we expect
         // callback request for update outside the library
         val content = json.decodeFromString<JsonObject>(responseString)["content"]
@@ -698,14 +696,22 @@ class Agnamer : ConfigurableSource, HttpSource() {
         return chaptersList
     }
 
-    private fun fixLink(link: String): String {
+    private fun linkTransform(link: String): String {
+        val forceLink = preferences.getString(FORCE_DOMAIN_IMG_PREF, "")
+        if (forceLink?.isNotBlank() == true) {
+            val path = link.substringAfter("://").substringAfter("/", "")
+            return if (path.isBlank()) {
+                forceLink
+            } else {
+                "$forceLink/$path"
+            }
+        }
         if (!link.startsWith("http")) {
             return mainUrl.replace("api.", "") + link
         }
         return link
     }
 
-    @TargetApi(Build.VERSION_CODES.N)
     private fun pageListParse(response: Response, chapter: SChapter): List<Page> {
         val body = response.body.string()
         val heightEmptyChunks = 10
@@ -733,17 +739,19 @@ class Agnamer : ConfigurableSource, HttpSource() {
                 client.newCall(exMangaManager.chapterRequest(body)).execute()
             }
             return try {
-                val page = json.decodeFromString<SeriesWrapperDto<PageDto>>(body)
-                page.content.pages.filter { it.height > heightEmptyChunks }
+                val resultDto = json.decodeFromString<SeriesWrapperDto<PageDto>>(body)
+                resultDto.content.pages.filter { it.height > heightEmptyChunks }
                     .mapIndexed { index, it ->
-                        Page(index, "", fixLink(it.link))
+                        Page(index, "", linkTransform(it.link))
                     }
             } catch (e: SerializationException) {
-                val page = json.decodeFromString<SeriesWrapperDto<ChunksPageDto>>(body)
+                val resultDto = json.decodeFromString<SeriesWrapperDto<ChunksPageDto>>(body)
                 val result = mutableListOf<Page>()
-                page.content.pages.forEach {
-                    it.filter { page -> page.height > heightEmptyChunks }.forEach { page ->
-                        result.add(Page(result.size, "", fixLink(page.link)))
+                resultDto.content.pages.forEach {
+                    it.forEach { page ->
+                        if (page.height > heightEmptyChunks) {
+                            result.add(Page(result.size, "", linkTransform(page.link)))
+                        }
                     }
                 }
                 return result
@@ -860,7 +868,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
             setVisible(false)
         }.also(screen::addPreference)
 
-        val domainPrefList = EditTextPreference(screen.context).apply {
+        val domainListPref = EditTextPreference(screen.context).apply {
             key = DOMAIN_LIST_PREF
             title = "Список доменов"
             summary = "Введите список доменов через ','"
@@ -884,7 +892,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
             }
         }.also(screen::addPreference)
 
-        val domains = domainPrefList.text.let(::nullableStringToArray)
+        val domains = domainListPref.text.let(::nullableStringToArray)
 
         if (domains.isNotEmpty()) {
             ListPreference(screen.context).apply {
@@ -905,7 +913,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
             }.also(screen::addPreference)
         }
 
-        EditTextPreference(screen.context).apply {
+        val domainImgListPref = EditTextPreference(screen.context).apply {
             key = DOMAIN_IMG_LIST_PREF
             title = "Список доменов изображений"
             summary = "Введите список доменов через ','"
@@ -913,7 +921,7 @@ class Agnamer : ConfigurableSource, HttpSource() {
             setOnPreferenceChangeListener { _, newValue ->
                 try {
                     val isSuccess =
-                        preferences.edit().putString(DOMAIN_LIST_PREF, newValue as String).commit()
+                        preferences.edit().putString(DOMAIN_IMG_LIST_PREF, newValue as String).commit()
 
                     Toast.makeText(
                         screen.context,
@@ -928,6 +936,27 @@ class Agnamer : ConfigurableSource, HttpSource() {
                 }
             }
         }.also(screen::addPreference)
+
+        val domainsImg = domainImgListPref.text.let(::nullableStringToArray)
+
+        if (domainsImg.isNotEmpty()) {
+            ListPreference(screen.context).apply {
+                key = FORCE_DOMAIN_IMG_PREF
+                title = "Выбор домена изображений"
+                entries = arrayOf("Авто", *domainsImg)
+                entryValues = arrayOf("", *domainsImg)
+                summary = "%s"
+                setDefaultValue("")
+                setOnPreferenceChangeListener { _, _ ->
+                    Toast.makeText(
+                        screen.context,
+                        "Для смены домена необходимо перезапустить приложение с полной остановкой",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    true
+                }
+            }.also(screen::addPreference)
+        }
 
         ListPreference(screen.context).apply {
             key = LANGUAGE_PREF
@@ -1037,6 +1066,8 @@ class Agnamer : ConfigurableSource, HttpSource() {
         private const val DOMAIN_LIST_PREF = "DOMAIN_LIST_PREF"
 
         private const val DOMAIN_IMG_LIST_PREF = "DOMAIN_IMG_LIST_PREF"
+
+        private const val FORCE_DOMAIN_IMG_PREF = "FORCE_DOMAIN_IMG_PREF"
 
         private const val LANGUAGE_PREF = "LANGUAGE_PREF"
 
