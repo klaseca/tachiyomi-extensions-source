@@ -77,6 +77,8 @@ class Agnamer : ConfigurableSource, HttpSource() {
         actualToken = preferences.getString(EX_TOKEN, null) ?: "",
         email = preferences.getString(EX_EMAIL_PREF, null) ?: "",
         password = preferences.getString(EX_PASSWORD_PREF, null) ?: "",
+        userAgent = preferences.getString(EX_USER_AGENT_PREF, null) ?: "",
+        apiVersion = preferences.getString(EX_API_VERSION_PREF, null) ?: "",
         preferenceTokenSetter = { preferences.edit().putString(EX_TOKEN, it).apply() },
         network = network,
     )
@@ -1025,6 +1027,40 @@ class Agnamer : ConfigurableSource, HttpSource() {
             }
         }.also(screen::addPreference)
 
+        EditTextPreference(screen.context).apply {
+            key = EX_USER_AGENT_PREF
+            title = "ExManga user agent"
+            setDefaultValue("Tachiyomi")
+            setOnPreferenceChangeListener { _, newValue ->
+                try {
+                    val isSuccess =
+                        preferences.edit().putString(EX_USER_AGENT_PREF, newValue as String).commit()
+
+                    isSuccess
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    false
+                }
+            }
+        }.also(screen::addPreference)
+
+        EditTextPreference(screen.context).apply {
+            key = EX_API_VERSION_PREF
+            title = "ExManga api version"
+            setDefaultValue("4")
+            setOnPreferenceChangeListener { _, newValue ->
+                try {
+                    val isSuccess =
+                        preferences.edit().putString(EX_API_VERSION_PREF, newValue as String).commit()
+
+                    isSuccess
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    false
+                }
+            }
+        }.also(screen::addPreference)
+
         CheckBoxPreference(screen.context).apply {
             key = IS_LIB_PREF
             title = "Скрыть «Закладки»"
@@ -1078,6 +1114,10 @@ class Agnamer : ConfigurableSource, HttpSource() {
         private const val EX_EMAIL_PREF = "EX_EMAIL_PREF"
 
         private const val EX_PASSWORD_PREF = "EX_PASSWORD_PREF"
+
+        private const val EX_USER_AGENT_PREF = "EX_USER_AGENT_PREF"
+
+        private const val EX_API_VERSION_PREF = "EX_API_VERSION_PREF"
 
         private const val EX_TOKEN = "EX_TOKEN"
 

@@ -25,13 +25,15 @@ class ExMangaManager(
     private var actualToken: String,
     private val email: String,
     private val password: String,
+    private val userAgent: String,
+    private val apiVersion: String,
     private val preferenceTokenSetter: (newToken: String) -> Unit,
     network: NetworkHelper,
 ) {
     private val url = "https://api.exmanga.org"
 
     private val headers =
-        Headers.Builder().set("User-Agent", "Tachiyomi").set("Version", "4").build()
+        Headers.Builder().set("User-Agent", userAgent).set("Version", apiVersion).build()
 
     private val json = Json
 
