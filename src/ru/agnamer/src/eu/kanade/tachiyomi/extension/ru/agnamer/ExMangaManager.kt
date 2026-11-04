@@ -1,128 +1,97 @@
 package eu.kanade.tachiyomi.extension.ru.agnamer
 
 import android.util.Base64
+import eu.kanade.tachiyomi.extension.ru.agnamer.dto.ExBookDto
+import eu.kanade.tachiyomi.extension.ru.agnamer.dto.ExLoginDto
+import eu.kanade.tachiyomi.extension.ru.agnamer.dto.ExTokenDto
+import eu.kanade.tachiyomi.extension.ru.agnamer.dto.ExTokenResponseDto
+import eu.kanade.tachiyomi.extension.ru.agnamer.dto.ExWrapperDto
+import eu.kanade.tachiyomi.extension.ru.agnamer.dto.PagesDto
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.POST
-import kotlinx.serialization.json.Json
+import keiyoushi.network.Fetch
+import keiyoushi.network.get
+import keiyoushi.network.put
+import keiyoushi.utils.parseAs
+import keiyoushi.utils.toJsonRequestBody
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.int
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import okhttp3.CacheControl
 import okhttp3.Headers
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
 import okhttp3.Response
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 class ExMangaManager(
     private var actualToken: String,
     private val email: String,
     private val password: String,
-    private val userAgent: String,
-    private val apiVersion: String,
+    userAgent: String,
+    apiVersion: String,
     private val preferenceTokenSetter: (newToken: String) -> Unit,
     network: NetworkHelper,
 ) {
     private val url = "https://api.exmanga.org"
 
-    private val headers =
-        Headers.Builder().set("User-Agent", userAgent).set("Version", apiVersion).build()
+    private val headers = Headers.Builder()
+        .set("User-Agent", userAgent)
+        .set("Version", apiVersion)
+        .build()
 
-    private val json = Json
+    private val authClient = network.client
 
-    private var expiredTokenUnixTimestamp = try {
+    private var expiredTokenUnixTimestamp = runCatching {
         getTokenExpiredUnixTimestamp(actualToken)
-    } catch (error: Exception) {
-        0
-    }
-
-    private val isTokenNotExpired
-        get() = expiredTokenUnixTimestamp >= System.currentTimeMillis() / 1000
-
-    private val client = network.cloudflareClient.newBuilder().build()
+    }.getOrDefault(0L)
 
     fun getToken(): String {
-        if (isTokenNotExpired) {
+        if (expiredTokenUnixTimestamp > System.currentTimeMillis() / 1000) {
             return actualToken
         }
 
-        return tokenRequest().let {
+        return tokenRequest().also {
             actualToken = it
             expiredTokenUnixTimestamp = getTokenExpiredUnixTimestamp(it)
             preferenceTokenSetter(it)
-            it
         }
-    }
-
-    fun handleResponse(response: Response): JsonElement {
-        val jsonElement = json.parseToJsonElement(response.peekBody(Long.MAX_VALUE).string())
-
-        val data = jsonElement.jsonObject["data"]
-
-        if (data == null) {
-            val message =
-                jsonElement.jsonObject["message"]?.jsonPrimitive?.contentOrNull?.let { ": $it" }
-                    ?: ""
-            throw IOException("Ошибка ExManga$message")
-        }
-
-        return data
     }
 
     fun imageRequest(imageUrl: String) = GET(imageUrl, headers)
 
-    fun pageListRequest(chapterUrl: String) = GET(url + chapterUrl, headers)
+    suspend fun searchManga(client: OkHttpClient, page: Int, query: String): Response {
+        val searchUrl = "$url/manga".toHttpUrl().newBuilder()
+            .addQueryParameter("take", "20")
+            .addQueryParameter("skip", (10 * (page - 1)).toString())
+            .addQueryParameter("name", query)
+            .build()
+        return client.get(searchUrl, headers, Fetch.XHR)
+    }
 
-    fun chapterRequest(body: String) = Request.Builder().url("$url/chapter").put(
-        body.toRequestBody(
-            "application/json; charset=utf-8".toMediaTypeOrNull(),
-        ),
-    ).headers(headers.newBuilder().add("Content-Type", "application/json").build())
-        .cacheControl(CacheControl.Builder().maxAge(10, TimeUnit.MINUTES).build()).build()
+    suspend fun getChapterList(client: OkHttpClient, mangaId: Long): List<ExBookDto> = client.get("$url/chapter/history/$mangaId", headers, Fetch.XHR)
+        .parseAs<ExWrapperDto<List<ExBookDto>>>().data
 
-    fun searchMangaRequest(page: Int, query: String) = GET(
-        "$url/manga?take=20&skip=${10 * (page - 1)}&name=$query",
-        headers,
-    )
+    suspend fun getPages(client: OkHttpClient, chapterUrl: String): List<List<PagesDto>> = client.get(url + chapterUrl, headers, Fetch.XHR)
+        .parseAs<ExWrapperDto<List<List<PagesDto>>>>().data
 
-    fun fetchChapterListRequest(mangaId: Long?) = GET("$url/chapter/history/$mangaId", headers)
+    suspend fun shareChapter(client: OkHttpClient, payload: JsonElement) {
+        client.put("$url/chapter", headers, payload.toJsonRequestBody()).use { }
+    }
 
-    private fun getTokenExpiredUnixTimestamp(token: String): Int {
-        if (token.isBlank()) {
-            return 0
-        }
-
-        val payload = token.substringAfter(".").substringBefore(".")
-
-        val payloadJsonString = Base64.decode(payload, Base64.DEFAULT).decodeToString()
-
-        val jsonElement = json.parseToJsonElement(payloadJsonString)
-
-        return jsonElement.jsonObject["exp"]!!.jsonPrimitive.int
+    private fun getTokenExpiredUnixTimestamp(token: String): Long {
+        if (token.isBlank()) return 0L
+        val payload = token.substringAfter('.').substringBefore('.')
+        return Base64.decode(payload, Base64.URL_SAFE).decodeToString().parseAs<ExTokenDto>().exp
     }
 
     private fun tokenRequest(): String {
-        if (email == "" || password == "") {
+        if (email.isBlank() || password.isBlank()) {
             throw IOException("Введите email и password для ExManga")
         }
 
-        val jsonObject = buildJsonObject {
-            put("email", email)
-            put("password", password)
-        }
-
-        val body = jsonObject.toString()
-            .toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
-
-        val response = client.newCall(POST("$url/auth/login", headers, body)).execute()
-
-        return handleResponse(response).jsonPrimitive.content
+        // Token refresh runs inside the source's blocking authentication interceptor.
+        val body = ExLoginDto(email, password).toJsonRequestBody()
+        val response = authClient.newCall(POST("$url/auth/login", headers, body)).execute()
+            .parseAs<ExTokenResponseDto>()
+        return response.data ?: throw IOException("Ошибка ExManga${response.message?.let { ": $it" }.orEmpty()}")
     }
 }

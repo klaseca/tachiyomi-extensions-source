@@ -7,29 +7,32 @@ class CheckFilter(name: String, val id: String) : Filter.CheckBox(name)
 
 class SearchFilter(name: String, val id: String) : Filter.TriState(name)
 
-class OrderBy : Filter.Sort(
-    "Сортировка",
-    arrayOf(
-        "Новизне",
-        "Последним обновлениям",
-        "Популярности",
-        "Лайкам",
-        "Просмотрам",
-        "По кол-ву глав",
-        "Мне повезет",
-    ),
-    Selection(2, false),
-)
+class OrderBy :
+    Filter.Sort(
+        "Сортировка",
+        arrayOf(
+            "Новизне",
+            "Последним обновлениям",
+            "Популярности",
+            "Лайкам",
+            "Просмотрам",
+            "По кол-ву глав",
+            "Мне повезет",
+        ),
+        Selection(2, false),
+    )
 
-class RequireChapters : Filter.Select<String>(
-    "Только проекты с главами",
-    arrayOf("Да", "Все"),
-)
+class RequireChapters :
+    Filter.Select<String>(
+        "Только проекты с главами",
+        arrayOf("Да", "Все"),
+    )
 
-class RequireEX : Filter.Select<String>(
-    "Использовать поиск",
-    arrayOf("Remanga", "ExManga(без фильтров)"),
-)
+class RequireEX :
+    Filter.Select<String>(
+        "Использовать поиск",
+        arrayOf("Remanga", "ExManga(без фильтров)"),
+    )
 
 private val ageList = listOf(
     CheckFilter("Для всех", "0"),
@@ -40,24 +43,35 @@ private val ageList = listOf(
 class Age : Filter.Group<CheckFilter>("Возрастное ограничение", ageList)
 
 private val statusList = listOf(
-    CheckFilter("Закончен", "0"),
-    CheckFilter("Продолжается", "1"),
-    CheckFilter("Заморожен", "2"),
-    CheckFilter("Нет переводчика", "3"),
-    CheckFilter("Анонс", "4"),
-    CheckFilter("Лицензировано", "5"),
+    CheckFilter("Закончен", "1"),
+    CheckFilter("Продолжается", "2"),
+    CheckFilter("Заморожен", "3"),
+    CheckFilter("Анонс", "5"),
+    CheckFilter("Лицензировано", "6"),
 )
 
 class Status : Filter.Group<CheckFilter>("Статус", statusList)
 
+class TranslateStatus :
+    Filter.Group<CheckFilter>(
+        "Статус перевода",
+        listOf(
+            CheckFilter("Закончен", "1"),
+            CheckFilter("Продолжается", "2"),
+            CheckFilter("Заморожен", "3"),
+            CheckFilter("Нет переводчика", "4"),
+            CheckFilter("Не переводится (лицензировано)", "5"),
+        ),
+    )
+
 private val typeList = listOf(
-    SearchFilter("Манга", "0"),
-    SearchFilter("Манхва", "1"),
-    SearchFilter("Маньхуа", "2"),
-    SearchFilter("Западный комикс", "3"),
-    SearchFilter("Рукомикс", "4"),
-    SearchFilter("Индонезийский комикс", "5"),
-    SearchFilter("Другое", "6"),
+    SearchFilter("Манга", "1"),
+    SearchFilter("Манхва", "2"),
+    SearchFilter("Маньхуа", "3"),
+    SearchFilter("Западный комикс", "4"),
+    SearchFilter("Рукомикс", "5"),
+    SearchFilter("Индонезийский комикс", "6"),
+    SearchFilter("Другое", "7"),
 )
 
 class Type : Filter.Group<SearchFilter>("Типы", typeList)
@@ -238,6 +252,7 @@ val filterList = FilterList(
     Category(),
     Type(),
     Status(),
+    TranslateStatus(),
     Age(),
     My(),
     RequireChapters(),

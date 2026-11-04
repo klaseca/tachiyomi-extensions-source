@@ -1,139 +1,197 @@
 package eu.kanade.tachiyomi.extension.ru.agnamer.dto
 
+import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.utils.MarkdownDescription
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import org.jsoup.Jsoup
 
 @Serializable
-data class TagsDto(
-    val id: Int,
+class TagsDto(
     val name: String,
 )
 
 @Serializable
-data class BranchesDto(
+class BranchesDto(
     val id: Long,
-    val count_chapters: Int,
+    @SerialName("count_chapters") val countChapters: Int,
 )
 
 @Serializable
-data class ImgDto(
+class ImgDto(
     val high: String? = null,
     val mid: String? = null,
-    val low: String? = null,
 )
 
 @Serializable
-data class LibraryDto(
-    val id: Long,
-    val en_name: String,
-    val rus_name: String,
-    val dir: String,
-    val img: ImgDto,
-    val bookmark_type: String? = null,
-)
+class LibraryDto(
+    @SerialName("secondary_name") private val secondaryName: String,
+    @SerialName("main_name") private val mainName: String,
+    private val dir: String,
+    private val cover: ImgDto,
+) {
+    fun toSManga(baseUrl: String, language: String?): SManga = SManga.create().apply {
+        title = if (language == "rus") mainName else secondaryName
+        url = "/api/titles/$dir/"
+        thumbnail_url = cover.mid?.let { baseUrl + it }
+    }
+}
 
 @Serializable
-data class MyLibraryDto(
+class MyLibraryDto(
     val title: LibraryDto,
 )
 
 @Serializable
-data class StatusDto(
+class StatusDto(
     val id: Int,
-    val name: String,
 )
 
 @Serializable
-data class MangaDto(
+class MangaDto(
     val id: Long,
-    val en_name: String,
-    val rus_name: String,
-    val another_name: String,
-    val dir: String,
-    val description: String?,
-    val issue_year: Int?,
-    val img: ImgDto,
-    val type: TagsDto,
-    val genres: List<TagsDto>,
-    val categories: List<TagsDto>,
+    @SerialName("secondary_name") private val secondaryName: String,
+    @SerialName("main_name") private val mainName: String,
+    @SerialName("another_name") private val anotherName: String,
+    private val dir: String,
+    private val description: String?,
+    private val cover: ImgDto,
+    private val type: TagsDto,
+    private val genres: List<TagsDto>,
+    private val categories: List<TagsDto>,
     val branches: List<BranchesDto>,
-    val status: StatusDto,
-    val avg_rating: JsonElement,
-    val count_rating: Int,
-    val age_limit: Int,
-)
+    private val status: StatusDto,
+    @SerialName("avg_rating") private val avgRating: JsonElement,
+    @SerialName("count_rating") private val countRating: Int,
+    @SerialName("age_limit") private val ageLimit: StatusDto,
+) {
+    fun toSManga(baseUrl: String, language: String?): SManga = SManga.create().apply {
+        title = if (language == "rus") mainName else secondaryName
+        url = "/api/titles/$dir/"
+        thumbnail_url = cover.high?.let { baseUrl + it }
+        description = MarkdownDescription.Builder()
+            .info(if (language == "rus") secondaryName else mainName)
+            .rating(avgRating.jsonPrimitive.floatOrNull, votes = countRating)
+            .altTitles(anotherName.split(" / "), label = "Альтернативные названия")
+            .description(this@MangaDto.description?.let { Jsoup.parseBodyFragment(it, baseUrl).body() })
+            .build()
+        genre = buildList {
+            add(if (type.name == "Западный комикс") "Комикс" else type.name)
+            when (ageLimit.id) {
+                1 -> add("16+")
+                2 -> add("18+")
+            }
+            addAll((genres + categories).map { it.name })
+        }.joinToString()
+        status = when (this@MangaDto.status.id) {
+            1 -> SManga.COMPLETED
+            2, 5 -> SManga.ONGOING
+            3, 4 -> SManga.ON_HIATUS
+            // LICENSED hides chapters that may still be available.
+            else -> SManga.UNKNOWN
+        }
+    }
+}
 
 @Serializable
-data class PropsDto(
-    val total_pages: Int? = 0,
+class PropsDto(
+    @SerialName("total_pages") val totalPages: Int,
     val page: Int,
 )
 
 @Serializable
-data class PageWrapperDto<T>(
-    val content: List<T>,
-    val props: PropsDto,
-)
+class PageWrapperDto<T>(
+    val results: List<T>,
+    private val next: JsonPrimitive?,
+) {
+    val hasNextPage: Boolean get() = next != null
+}
 
 @Serializable
-data class SeriesWrapperDto<T>(
+class SearchPageDto(
+    val results: List<LibraryDto>,
+    private val meta: PropsDto,
+) {
+    val hasNextPage: Boolean get() = meta.page < meta.totalPages
+}
+
+@Serializable
+class SeriesWrapperDto<T>(
     val content: T,
 )
 
 @Serializable
-data class PublisherDto(
+class PublisherDto(
     val name: String,
 )
 
 @Serializable
-data class BookDto(
+class BookDto(
     val id: Long,
     val tome: Int,
     val chapter: String,
     val name: String,
-    val upload_date: String,
-    val is_paid: Boolean,
-    val is_bought: Boolean?,
+    @SerialName("upload_date") val uploadDate: String,
+    @SerialName("is_paid") val isPaid: Boolean,
+    @SerialName("is_bought") val isBought: Boolean?,
     val publishers: List<PublisherDto>,
 )
 
 @Serializable
-data class ExWrapperDto<out T>(
+class ExWrapperDto<out T>(
     val data: T,
 )
 
 @Serializable
-data class ExBookDto(
+class ExBookDto(
     val id: Long,
     val tome: Int,
     val chapter: String,
 )
 
 @Serializable
-data class ExLibraryDto(
-    val id: Long,
-    val dir: String,
-    val name: String = "Без названия",
-    val img: String?,
-)
+class ExLibraryDto(
+    private val dir: String,
+    private val name: String,
+    private val img: String?,
+) {
+    fun toSManga(baseUrl: String): SManga = SManga.create().apply {
+        title = name
+        url = "/api/titles/$dir/"
+        thumbnail_url = img?.let { baseUrl + it }
+    }
+}
 
 @Serializable
-data class PagesDto(
+class PagesDto(
     val link: String,
     val height: Int,
 )
 
 @Serializable
-data class PageDto(
+class PageDto(
     val pages: List<PagesDto>,
 )
 
 @Serializable
-data class ChunksPageDto(
+class ChunksPageDto(
     val pages: List<List<PagesDto>>,
 )
 
 @Serializable
-data class UserDto(
+class UserDto(
     val id: Long,
 )
+
+@Serializable
+class ExLoginDto(private val email: String, private val password: String)
+
+@Serializable
+class ExTokenDto(val exp: Long)
+
+@Serializable
+class ExTokenResponseDto(val data: String? = null, val message: String? = null)
